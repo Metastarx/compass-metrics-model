@@ -547,9 +547,10 @@ def _contributor_lines_query(git_repos, from_date, to_date, top_n=None, include_
     （contributor_code_contribution_ratio_by_period）共用这一个查询，
     保证两个指标的过滤与聚合口径完全一致，占比之和才能稳定为 1。
     """
+    # 纯聚合查询：两个指标都只读 aggregations.by_author，不读 hits.total，
+    # 因此不开 track_total_hits，让 OpenSearch 走默认的优化路径。
     query = {
         "size": 0,
-        "track_total_hits": True,
         "query": {
             "bool": {
                 "must": [
@@ -638,7 +639,10 @@ def contributor_code_contribution_ratio_by_period(client, git_index, end_date, r
     各贡献者贡献代码量占比（《软件产品开源代码安全评价方法》）。
 
     在“各贡献者贡献代码量”的基础上，计算每位贡献者变更代码行数占周期总量的比例：
-      - 明细中所有贡献者占比之和为 1，无代码变更时占比为 None；
+      - 占比按完整浮点精度返回，不逐人四舍五入，明细中所有贡献者占比之和恒为 1
+        （逐人 round 到 6 位会让三位均分的场景变成 0.999999）；需要展示精度时由
+        调用方自行 round；
+      - 无代码变更时占比为 None；
       - contributor_code_contribution_ratio 取首位贡献者的占比，
         可反映代码贡献的集中程度（巴士因子风险）。
     """
@@ -648,7 +652,10 @@ def contributor_code_contribution_ratio_by_period(client, git_index, end_date, r
     total_lines = detail["contributor_code_contribution"]
     ratios = []
     for item in contributors:
-        ratio = round(item["lines_changed"] / total_lines, 6) if total_lines > 0 else None
+        # 保留完整精度：逐人四舍五入会让明细占比之和偏离 1
+        # （例如三位贡献者均分时 0.333333 x 3 = 0.999999），
+        # 需要展示精度的调用方自行 round。
+        ratio = item["lines_changed"] / total_lines if total_lines > 0 else None
         ratios.append({
             "author_name": item["author_name"],
             "lines_changed": item["lines_changed"],

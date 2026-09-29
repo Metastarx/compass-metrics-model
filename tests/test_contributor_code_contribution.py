@@ -86,6 +86,16 @@ class ContributorCodeContributionTest(unittest.TestCase):
         self.assertEqual(body["aggs"]["by_author"]["terms"]["field"], "author_name")
         self.assertEqual(body["aggs"]["by_author"]["terms"]["order"], {"lines_changed": "desc"})
 
+    def test_query_does_not_track_total_hits(self):
+        """The query is aggregation-only, so it must not ask OpenSearch to
+        count hits: ``hits.total`` is never read and tracking it only costs
+        every request."""
+        client = _FakeClient(_buckets_response(self.rows))
+        contributor_code_contribution_by_period(
+            client, "github-git_enriched", datetime(2025, 3, 15), ["https://github.com/x/y"])
+        self.assertNotIn("track_total_hits", client.calls[0]["body"])
+        self.assertEqual(client.calls[0]["body"]["size"], 0)
+
     def test_bots_are_excluded_by_default(self):
         client = _FakeClient(_buckets_response(self.rows))
         contributor_code_contribution_by_period(
@@ -132,7 +142,27 @@ class ContributorCodeContributionTest(unittest.TestCase):
         self.assertEqual(result["contributor_code_contribution_total_lines"], 150)
         self.assertAlmostEqual(result["contributor_code_contribution_ratio"], 0.733333, places=6)
         ratios = result["contributor_code_contribution_ratio_detail"]
-        self.assertAlmostEqual(sum(item["contribution_ratio"] for item in ratios), 1.0, places=6)
+        # 12 位小数是刻意的：占比按完整精度返回，不做逐人截断
+        # （三位均分场景见 test_ratio_detail_sums_to_one_for_an_even_split）。
+        self.assertAlmostEqual(sum(item["contribution_ratio"] for item in ratios), 1.0, places=12)
+        self.assertEqual([item["lines_changed"] for item in ratios], [110, 40])
+
+    def test_ratio_detail_sums_to_one_for_an_even_split(self):
+        """Every detail ratio adds up to exactly 1, even when no contribution
+        has a short decimal representation."""
+        client = _FakeClient(_buckets_response([
+            ("alice", 1, 10, 0, 10),
+            ("bob", 1, 10, 0, 10),
+            ("carol", 1, 10, 0, 10),
+        ]))
+        result = contributor_code_contribution_ratio_by_period(
+            client, "github-git_enriched", datetime(2025, 3, 15), ["https://github.com/x/y"])
+
+        ratios = result["contributor_code_contribution_ratio_detail"]
+        self.assertEqual([item["contribution_ratio"] for item in ratios], [1 / 3, 1 / 3, 1 / 3])
+        self.assertAlmostEqual(sum(item["contribution_ratio"] for item in ratios), 1.0, places=12)
+        # 展示时四舍五入是调用方的事，指标本身不做这层截断。
+        self.assertEqual(round(ratios[0]["contribution_ratio"], 6), 0.333333)
 
     def test_ratio_is_none_without_code(self):
         client = _FakeClient(_buckets_response([]))

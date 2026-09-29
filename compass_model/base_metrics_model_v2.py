@@ -168,9 +168,11 @@ individual_non_code_contribution_ratio_by_period
 
 )
 
-from  compass_metrics_v2.git_metrics_v2 import (lines_changed_by_period,commit_count_by_period,
-contributor_code_contribution_by_period,contributor_code_contribution_ratio_by_period
-
+from  compass_metrics_v2.git_metrics_v2 import (
+    lines_changed_by_period,
+    commit_count_by_period,
+    contributor_code_contribution_by_period,
+    contributor_code_contribution_ratio_by_period,
 )
 from  compass_metrics_v2.repo_metrics_v2 import (repo_stars_by_period,repo_forks_by_period)
 
